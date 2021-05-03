@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": " ts-node-dev bot.ts",
+    "start-db": " ts-node-dev src/mongo.db.ts",
     "build": "tsc bot.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -12,7 +13,10 @@
   "license": "ISC",
   "devDependencies": {
     "@types/node": "^15.0.1",
-    "tsc": "^1.20150623.0"
+    "fs": "0.0.1-security",
+    "tsc": "^1.20150623.0",
+    "winston": "^3.3.3",
+    "winston-daily-rotate-file": "^4.5.3"
   },
   "dependencies": {
     "array.prototype.findindex": "^2.1.0",
@@ -23,11 +27,11 @@
     "depd": "^2.0.0",
     "eventemitter3": "^4.0.7",
     "file-type": "^16.3.0",
-    "fs": "0.0.1-security",
     "http": "0.0.1-security",
     "https": "^1.0.0",
     "mime": "^2.5.2",
     "moment": "^2.29.1",
+    "mongoose": "^5.12.7",
     "node-cron": "^3.0.0",
     "pump": "^3.0.0",
     "request": "^2.88.2",

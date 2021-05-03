@@ -1,24 +1,38 @@
 import * as TelegramBot from './telegram-lib';
+import * as dbmgr from './src/mongo.db';
 const moment = require('moment');
 const request = require('request');
-
+let developerChatId = '1216194906'
 var TOKEN = '1619827676:AAGWd6i1z4unyzg-nCScX58RlERyU-9ACw8';
 var options = {
     polling: true
 };
-
+const msgObjs = []
 let commandSupport = `
 
-/start - begin conversation
-/vaccination_411020 - pincode and age group wise vaccination center list
-/states - find your state for vaccination
-/district_21 - find your district code for vaccination
-/vaccineindistrict_369 - enter district code for all list of centers
-/thanks - Say Thanks to developer :)
+Welcome to Vaccination Finder,
+This bot can help you find the vaccination for you and your family. 
+
+You can search by your pincode directly to get nearby vaccination centers, like below.
+/vaccination_411020 - pincode and age group wise vaccination center list 4⃣1⃣1⃣0⃣2⃣0⃣
+
+
+Or if you dont know pincode then you can start looking for centers in district, start searching for your state and then by district
+/states - find your state for vaccination 🗺🗺
+
+If you know district code (or try /states) you can search directly by 
+/vaccineindistrict_151 - enter district code for all list of centers 💉💉
+
+If you like the concept of bot or like to appreciate this effort please send a small thank you like this.
+/thanks - Say Thanks to developer :) ❤️
+
+Thank you,
+Vaccination Finder Bot
 `
 
 export class VaccineNotifierTelegramBot {
     bot;
+    dbm = new dbmgr.DBManager();
     constructor() {
         this.bot = new TelegramBot(TOKEN, options)
         this.initCommands()
@@ -28,13 +42,23 @@ export class VaccineNotifierTelegramBot {
         console.log('OK')
         const _that = this;
         this.bot.onText(/\/start$/, function onText(msg) {
-            console.log('start')
-            _that.sendMessage(msg, 'Hi You can try any sample command from below to get started. \n\n' + commandSupport)
+            msgObjs.push(msg.chat)
+            console.log(msg.chat)
+
+            _that.bot.sendMessage(developerChatId, `${msg.chat.first_name}, started using bot ! their username is ${msg.chat.username || 'Not known'}`)
+            _that.sendMessage(msg, commandSupport)
+            _that.dbm.insert(msg.chat)
         });
 
         this.bot.onText(/\/thanks$/, function onText(msg) {
             console.log('thanks')
-            _that.sendMessage(msg, 'Thank you for appreciating the efforts, you can send me a thank you note on  https://t.me/bhushan0310 to appreciate it.\n Thanks for using Vaccincation Notifier Bot. <a href="https://"></a> \n\nStay Safe. Stay Healthy.')
+            _that.bot.sendMessage(developerChatId, `${msg.chat.first_name}, said thank you ! their username is ${msg.chat.username}`)
+            _that.sendMessage(msg, 'Thank you for appreciating the efforts, you can send me a thank you note on  https://t.me/bhushan0310 to appreciate it.\nThanks for using Vaccincation Finder Bot, I hope it will helped you and your family.\n <a href="https://"></a> \n\nStay Safe. Stay Healthy.')
+            _that.sendMessage(msg, `Hello,
+
+I found 💉💉 Vaccincation Center Finder bot 🤖🤖 on telegram📱 and it helped me to find vaccination centers by
+pincode 4⃣2⃣2⃣0⃣1⃣0⃣,\nstates 🗺🗺\ndistrict wise 🗾🗾\nYou can try it here, its very simple and elegant and FREE\n\n
+https://t.me/VaccineNotifier_IN_bot`);
         });
 
         this.bot.onText(/\/states$/, function onText(msg) {
@@ -112,8 +136,8 @@ export class VaccineNotifierTelegramBot {
 
 
     buildAndSendMessage(response, msgObj, totalSize?) {
-        console.log('vaccination response', response);
-        let msg = `Hello ${msgObj.first_name}, \n\nBelow are the details available as per covin website.\n\n`;
+        console.log('vaccination response', response, msgObj);
+        let msg = `Hello ${msgObj.chat.first_name}, \n\nBelow are the details available as per covin website.\n\n`;
         if (!response || !response.length) {
 
             msg += `There is no information available on this location, you can try your /district for other possible locations.`
@@ -137,7 +161,7 @@ export class VaccineNotifierTelegramBot {
                     });
 
                 } else {
-                    msg += ' - No Slots available'
+                    msg += ' - No Slots available, please check back again tomorrow !'
                 }
 
             });
