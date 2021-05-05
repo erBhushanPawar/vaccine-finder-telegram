@@ -1,4 +1,5 @@
 import { connect } from 'mongoose';
+import { query } from 'winston';
 import UsersModel from './db/users.model';
 import { logger } from './logger';
 
@@ -34,8 +35,20 @@ export class DBManager {
     }
 
     async insert(entry) {
-        await UsersModel.create(entry)
-        console.log('Added to DB', entry);
+        try {
+            UsersModel.findOne({ id: entry.id }).then((user) => {
+                if (user) { console.log('Returning user', entry); return }
 
+                UsersModel.create(entry)
+                console.log('Added to DB', entry);
+            })
+        } catch (error) {
+
+        }
+    }
+    async find(query = {}) {
+        console.log('Find in DB', query);
+        const r = await UsersModel.find(query)
+        return r;
     }
 }

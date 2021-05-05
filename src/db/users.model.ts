@@ -1,7 +1,7 @@
 import { model, Schema, Document } from 'mongoose';
 
 const userSchema: Schema = new Schema({
-    id: { required: true, type: Number }
+    id: { unique: true, required: true, type: Number }
 }, { strict: false });
 
 const UsersModel = model<any & Document>('Users', userSchema);
