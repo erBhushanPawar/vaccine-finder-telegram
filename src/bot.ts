@@ -1,6 +1,6 @@
 import * as TelegramBot from './telegram-lib';
-import * as dbmgr from './src/mongo.db';
-import * as redisCache from './src/db/redis-cache';
+import * as dbmgr from './mongo.db';
+import * as redisCache from './db/redis-cache';
 
 const moment = require('moment');
 const request = require('request');
@@ -109,6 +109,10 @@ https://t.me/VaccineNotifier_IN_bot`);
         this.bot.onText(/\/states$/, function onText(msg) {
             let dmsg = ''
             _that.getStates((r) => {
+                if (!r) {
+                    _that.sendMessage(msg, 'Server is busy or not reponding at the moment, please try again later. Please check on official website here <a href="https://www.cowin.gov.in/home">Covin Website</a>')
+                    return;
+                }
                 dmsg = r.states.map(d => `<b>${d.state_name}</b> /district_${d.state_id}`).join('\n')
                 _that.sendMessage(msg, dmsg)
             })
@@ -366,7 +370,12 @@ https://t.me/VaccineNotifier_IN_bot`);
     getStates(cbFun) {
         request('https://cdn-api.co-vin.in/api/v2/admin/location/states', {}, (err, res, body) => {
             if (err) { return console.log(err); }
-            cbFun(JSON.parse(body))
+
+            try {
+                cbFun(JSON.parse(body))
+            } catch (error) {
+                cbFun(null)
+            }
         });
     }
 
