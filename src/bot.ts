@@ -1,18 +1,20 @@
 import * as TelegramBot from './telegram-lib';
 import * as dbmgr from './mongo.db';
 import * as redisCache from './db/redis-cache';
+import { districts, states } from './db/master.data';
 
 const moment = require('moment');
 const request = require('request');
 
 let developerChatId = '1216194906'
-var TOKEN = '1619827676:AAGWd6i1z4unyzg-nCScX58RlERyU-9ACw8';
+var TOKEN = process.env.TOKEN;
+
 var options = {
     polling: true
 };
 const msgObjs = []
+let isBlocked = false;
 let commandSupport = `
-
 Welcome to Vaccination Finder,
 This bot can help you find the vaccination for you and your family. 
 
@@ -51,36 +53,40 @@ export class VaccineNotifierTelegramBot {
     redisCache = new redisCache.RedisCache()
     constructor() {
         this.bot = new TelegramBot(TOKEN, options)
+        this.bot.on("polling_error", console.log);
         this.initCommands()
         console.log('BOT OK')
-        // this.sendAnnouncement()
+        //this.sendAnnouncement()
     }
 
     sendAnnouncement() {
         this.dbm.find().then((d) => {
             d = JSON.parse(JSON.stringify(d))
             d.forEach((e, i) => {
-                if (i < 2000) {
+                if (i < 1) {
                     console.log('Sending announcement to', e)
-                    this.sendMessage({ chat: e }, `Hello ${e.first_name}\n\n We are having new announcement for you
+                    this.sendMessage({ chat: e }, `Hello ${e.first_name}\n\n 
+🚨🚨🚨
+<b>Important : Security and Verification Request by Telegram</b>
 
-🎉🎉🎉🎉🎉
+Dear valued user,
+Some users (and you may also in future) get Verification request by Telegram. <b>This request is sent by Telegram and not by our bot.</b>
+This is sent to check users on highly active bots and channels by Telegram automatically to confirm that your are REAL users and not other bots. 
 
-New features announcement
+If you are requested the same, please complete the process without worrying that your information may be compromized.
+(Please see screenshot of verification request.)
+** WE don't get any information about your verification **
 
-You can now search with
-- Improved Data sources, and supporting Rural and Nearby Areas
-- weekly schedule for given center
-- See weekly stock availability and much more
+Also,
 
-🎉🎉🎉🎉🎉
+In case you were facing server unavailable from yesterday, it was because of request limit imposed by government website. 
+We worked hard to resolve that issue for now and it should be good. But they can only serve 100 requests per 5 minutes, so we will try to respond you as soon as possible. 
+In case of request limit is reached on our end then we will respond after some time automatically, you are requested to wait for some time.
 
-You can send suggestions to developer if you want please use /thanks for more information
-
-Please start using /start to begin !
-
-Stay safe. Stay Healthy !
+🙏 We request your support in this time. 🙏
+Stay safe. Stay Healthy. Strong Together !
                     `)
+                    this.bot.sendPhoto(e.id, 'https://originscan.in/assets/image/telegram-real-user.jpeg')
                 }
             });
         })
@@ -90,8 +96,9 @@ Stay safe. Stay Healthy !
         const _that = this;
         this.bot.onText(/\/start$/, function onText(msg) {
             msgObjs.push(msg.chat)
-            _that.bot.sendMessage(developerChatId, `${msg.chat.first_name}, started using bot ! their username is ${msg.chat.username || 'Not known'}`)
-            _that.sendMessage(msg, commandSupport)
+            _that.bot.sendMessage(developerChatId, `isBlocked ? ${isBlocked} : ${msg.chat.first_name}, started using bot ! their username is ${msg.chat.username || 'Not known'}`)
+            _that.sendMessage(msg,
+                `${isBlocked ? '<b>CURRENTLY WE ARE NOT ABLE TO GET RESPONSE FROM COWIN WEBSITE API, PLEASE TRY LATER OR CHECK ON <a href="https://www.cowin.gov.in/home">CoWIN Website</a></b>\n\n\n\n\n' : ''} ${commandSupport}`)
             _that.dbm.insert(msg.chat)
         });
 
@@ -110,63 +117,13 @@ https://t.me/VaccineNotifier_IN_bot`);
             let dmsg = ''
             _that.getStates((r) => {
                 if (!r) {
-                    _that.sendMessage(msg, 'Server is busy or not reponding at the moment, please try again later. Please check on official website here <a href="https://www.cowin.gov.in/home">Covin Website</a>')
+                    _that.sendMessage(msg, 'Server is busy or not reponding at the moment, please try again later. Please check on official website here on <a href="https://www.cowin.gov.in/home">CoWIN Website</a>')
                     return;
                 }
                 dmsg = r.states.map(d => `<b>${d.state_name}</b> /district_${d.state_id}`).join('\n')
                 _that.sendMessage(msg, dmsg)
             })
         });
-
-        this.bot.onText(/\/district(.)*/, function onText(msg) {
-            let [cmd, stateCode] = msg.text.split('_')
-            let dmsg = ''
-            if (!stateCode) {
-                _that.sendMessage(msg, `Please provide a state code to find districts, use /states for more information`)
-                return;
-            }
-            _that.getDistricts(stateCode, (r) => {
-                console.log(r)
-                dmsg = r.districts.map(d => `\n\n<b>${d.district_name}</b>\n     Main Centers: /vaccineindistrict_${d.district_id}\n     Rural and Nearby: /districtlevel_${d.district_id}`).join('\n')
-                _that.sendMessage(msg, dmsg)
-            })
-        });
-
-        this.bot.onText(/\/vaccineindistrict(.)*/, function onText(msg) {
-            let [cmd, districtCode, date] = msg.text.split('_')
-            if (!date) {
-                date = moment();
-                date = date.format('DD-MM-YYYY')
-            }
-            if (!districtCode) {
-                _that.sendMessage(msg, `Please provide a district code to find vaccination centers, use /states for more information`)
-                return;
-            }
-            _that.getVaccinesInDistrict(districtCode, date, (r) => {
-                _that.chunk(r.sessions, 10).forEach(ar => {
-                    console.log('Sending.......', ar)
-                    _that.buildAndSendMessage([{ validSlots: ar }], msg, districtCode)
-                })
-            })
-
-
-        });
-
-        this.bot.onText(/\/vaccination(.)*/, function onText(msg) {
-            let [cmd, pincode, age] = msg.text.split('_')
-            console.log(msg.chat)
-            if (!pincode) {
-                _that.sendMessage(msg, `Please give me pin code to find vaccination center like <b>/vaccination_422010</b> or try /states to find center`)
-            } else {
-                _that.checkAvailability(pincode, age, (d) => {
-                    console.log('vaccination', d)
-                    let totalSize = d.validSlots.length;
-                    _that.chunk(d.validSlots, 15).forEach(r => {
-                        _that.buildAndSendMessage([{ validSlots: r }], msg)
-                    })
-                })
-            }
-        })
         this.bot.onText(/\/districtlevel*/, function onText(msg) {
             let [cmd, districtCode, date] = msg.text.split('_')
             if (!date) {
@@ -178,7 +135,10 @@ https://t.me/VaccineNotifier_IN_bot`);
                 return;
             }
             _that.getForWeekByDistrict(date, districtCode, (d) => {
-
+                if (!d) {
+                    _that.sendMessage(msg, 'Server is busy or not reponding at the moment, please try again later. Please check on official website here on <a href="https://www.cowin.gov.in/home">CoWIN Website</a>')
+                    return;
+                }
                 console.log('vaccination', d)
                 let msgStr = `Hello ${msg.chat.first_name}, there are total ${d.centers.length} available centers for next 7 days, starting from ${date}`
                 msgStr += `\n(This data get updated on daily basis, so we recommend to keep checking)\n\n`
@@ -208,6 +168,63 @@ https://t.me/VaccineNotifier_IN_bot`);
                 }
             })
         })
+        this.bot.onText(/\/district(.)*/, function onText(msg) {
+            let [cmd, stateCode] = msg.text.split('_')
+            let dmsg = ''
+            if (!stateCode) {
+                _that.sendMessage(msg, `Please provide a state code to find districts, use /states for more information`)
+                return;
+            }
+            _that.getDistricts(stateCode, (r) => {
+                dmsg = r.districts.map(d => `\n\n<b>${d.district_name}</b>\n     Main Centers: /vaccineindistrict_${d.district_id}\n     Rural and Nearby: /districtlevel_${d.district_id}`).join('\n')
+                _that.sendMessage(msg, dmsg)
+            })
+        });
+
+        this.bot.onText(/\/vaccineindistrict(.)*/, function onText(msg) {
+            let [cmd, districtCode, date] = msg.text.split('_')
+            if (!date) {
+                date = moment();
+                date = date.format('DD-MM-YYYY')
+            }
+            if (!districtCode) {
+                _that.sendMessage(msg, `Please provide a district code to find vaccination centers, use /states for more information`)
+                return;
+            }
+            _that.getVaccinesInDistrict(districtCode, date, (r) => {
+                if (!r) {
+                    _that.sendMessage(msg, 'Server is busy or not reponding at the moment, please try again later. Please check on official website here on <a href="https://www.cowin.gov.in/home">CoWIN Website</a>')
+                    return;
+                }
+                _that.chunk(r.sessions, 10).forEach(ar => {
+                    console.log('Sending.......', ar)
+                    _that.buildAndSendMessage([{ validSlots: ar }], msg, districtCode)
+                })
+            })
+
+
+        });
+
+        this.bot.onText(/\/vaccination(.)*/, function onText(msg) {
+            let [cmd, pincode, age] = msg.text.split('_')
+            console.log(msg.chat)
+            if (!pincode) {
+                _that.sendMessage(msg, `Please give me pin code to find vaccination center like <b>/vaccination_422010</b> or try /states to find center`)
+            } else {
+                _that.checkAvailability(pincode, age, (d) => {
+                    if (!d) {
+                        _that.sendMessage(msg, 'Server is busy or not reponding at the moment, please try again later. Please check on official website here on <a href="https://www.cowin.gov.in/home">CoWIN Website</a>')
+                        return;
+                    }
+                    console.log('vaccination', d)
+                    let totalSize = d.validSlots.length;
+                    _that.chunk(d.validSlots, 15).forEach(r => {
+                        _that.buildAndSendMessage([{ validSlots: r }], msg)
+                    })
+                })
+            }
+        })
+
         this.bot.onText(/\/slotsinweek(.)*/, function onText(msg) {
             let key = msg.text.replace('/slotsinweek_', '')
             _that.redisCache.getVal(key).then(v => {
@@ -237,7 +254,10 @@ https://t.me/VaccineNotifier_IN_bot`);
                     date = date.format('DD-MM-YYYY')
                 }
                 _that.getForWeek(date, pincode, (d) => {
-
+                    if (!d) {
+                        _that.sendMessage(msg, 'Server is busy or not reponding at the moment, please try again later. Please check on official website here on <a href="https://www.cowin.gov.in/home">CoWIN Website</a>')
+                        return;
+                    }
                     console.log('vaccination', d)
                     let msgStr = `Hello ${msg.chat.first_name}, there are total ${d.centers.length} available centers for next 7 days, starting from ${date}`
                     msgStr += `\n(This data get updated on daily basis, so we recommend to keep checking)\n\n`
@@ -333,68 +353,57 @@ https://t.me/VaccineNotifier_IN_bot`);
     }
 
     getSlotsForDate(PINCODE, DATE, AGE, cbFun) {
-        let config = {
-            method: 'get',
-            url: 'https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/findByPin?pincode=' + PINCODE + '&date=' + DATE,
-            headers: {
-                'accept': 'application/json',
-                'Accept-Language': 'hi_IN'
-            }
-        };
-
-
-        request(config.url, { json: true, header: config.headers }, (err, res, body) => {
-            if (err) { return console.log(err); }
-            console.log(config.url);
-            cbFun(body.sessions)
-        });
+        const url = 'https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/findByPin?pincode=' + PINCODE + '&date=' + DATE
+        this.makeGetRequest(url, cbFun)
     }
 
     getForWeek(date, pincode, cbFun) {
-
-        request(`https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/calendarByPin?pincode=${pincode}&date=${date}`, {}, (err, res, body) => {
-            if (err) { return console.log(err); }
-            cbFun(JSON.parse(body))
-        });
+        const url = `https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/calendarByPin?pincode=${pincode}&date=${date}`
+        this.makeGetRequest(url, cbFun)
     }
 
     getForWeekByDistrict(date, district_id, cbFun) {
         const url = `https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/calendarByDistrict?district_id=${district_id}&date=${date}`
-        console.log(url)
-        request(url, {}, (err, res, body) => {
-            if (err) { return console.log(err); }
-            cbFun(JSON.parse(body))
-        });
+        this.makeGetRequest(url, cbFun)
     }
 
     getStates(cbFun) {
-        request('https://cdn-api.co-vin.in/api/v2/admin/location/states', {}, (err, res, body) => {
-            if (err) { return console.log(err); }
+        cbFun({ "states": states, "ttl": 24 })
+    }
 
+    setBlockedStatus() {
+        isBlocked = true;
+        setTimeout(() => {
+            isBlocked = false;
+        }, 7 * 60 * 1000); // 7 min
+    }
+
+    getDistricts(stateCode, cbFun) {
+        cbFun(cbFun({ "districts": districts[stateCode], "ttl": 24 }))
+    }
+
+    makeGetRequest(url, cbFun) {
+        const options = {
+            url,
+            method: 'GET',
+            headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36' }
+        };
+
+        request(options, function (err, res, body) {
             try {
-                cbFun(JSON.parse(body))
+                let json = JSON.parse(body);
+                console.log(json);
+                cbFun(json)
             } catch (error) {
                 cbFun(null)
             }
         });
     }
 
-    getDistricts(stateCode, cbFun) {
-
-        request(`https://cdn-api.co-vin.in/api/v2/admin/location/districts/${stateCode}`, {}, (err, res, body) => {
-            if (err) { return console.log(err); }
-            cbFun(JSON.parse(body))
-        });
-    }
-
     getVaccinesInDistrict(districtCode, date, cbFun) {
-
         const url = `https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/findByDistrict?district_id=${districtCode}&date=${date}`;
         console.log(url)
-        request(url, {}, (err, res, body) => {
-            if (err) { return console.log(err); }
-            cbFun(JSON.parse(body))
-        });
+        this.makeGetRequest(url, cbFun)
     }
 
     fetchNextDays(count) {
