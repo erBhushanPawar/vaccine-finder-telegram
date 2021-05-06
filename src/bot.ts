@@ -6,7 +6,7 @@ const moment = require('moment');
 const request = require('request');
 
 let developerChatId = '1216194906'
-var TOKEN = '1619827676:AAGWd6i1z4unyzg-nCScX58RlERyU-9ACw8';
+var TOKEN = '';
 var options = {
     polling: true
 };
