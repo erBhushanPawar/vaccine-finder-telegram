@@ -2,7 +2,10 @@ import * as TelegramBot from './telegram-lib';
 import * as dbmgr from './mongo.db';
 import * as redisCache from './db/redis-cache';
 import { districts, states } from './db/master.data';
-
+import { MQTTManager } from './mqtt';
+import { logger } from './logger';
+import { RMQ } from './processor/rabbitmq';
+import { TelegramProcessor } from './processor/telegram.processor';
 const moment = require('moment');
 const request = require('request');
 
@@ -23,10 +26,12 @@ This bot can help you find the vaccination for you and your family.
 New features announcement
 
 You can now search
+- Subscribe to your district data source use /subscribe
+- GET notification when slot is available
+
 - Improved Data sources, and supporting Rural and Nearby Areas
 - weekly schedule for given center
 - See weekly stock availability and much more
-
 🎉🎉🎉🎉🎉
 
 
@@ -46,17 +51,43 @@ If you like the concept of bot or like to appreciate this effort please send a s
 Thank you,
 Vaccination Finder Bot
 `
-
 export class VaccineNotifierTelegramBot {
     bot;
     dbm = new dbmgr.DBManager();
     redisCache = new redisCache.RedisCache()
+    mqttMgr = null;
+    rmqMgr = null;
+    telegramProcessor
     constructor() {
         this.bot = new TelegramBot(TOKEN, options)
+        this.telegramProcessor = new TelegramProcessor(this.bot)
         this.bot.on("polling_error", console.log);
         this.initCommands()
         console.log('BOT OK')
+        this.mqttMgr = new MQTTManager(this.bot, this.redisCache, this.dbm)
+        this.rmqMgr = new RMQ()
+        let priorityList = [886698854, 1573533763, 1216194906, 1714758916, 980753480]
+        setInterval(() => {
+            this.dbm.groupByDistrictCode().then(r => {
+                r.forEach(e => {
+                    if (e._id == 363) {
+                        console.log('publishing job')
+                        this.rmqMgr.publish({ districtCode: e._Id, ...e })
+                    }
+                });
+            })
+        }, 3 * 60 * 1000)
+
         //this.sendAnnouncement()
+    }
+    sendNotification() {
+
+        this.dbm.find().then((d) => {
+            d = JSON.parse(JSON.stringify(d))
+            this.mqttMgr.processDB(d)
+        })
+
+
     }
 
     sendAnnouncement() {
@@ -65,28 +96,44 @@ export class VaccineNotifierTelegramBot {
             d.forEach((e, i) => {
                 if (i < 1) {
                     console.log('Sending announcement to', e)
-                    this.sendMessage({ chat: e }, `Hello ${e.first_name}\n\n 
-🚨🚨🚨
-<b>Important : Security and Verification Request by Telegram</b>
+                    this.sendMessage({ chat: e }, `
+Hello ${e.first_name}
 
-Dear valued user,
-Some users (and you may also in future) get Verification request by Telegram. <b>This request is sent by Telegram and not by our bot.</b>
-This is sent to check users on highly active bots and channels by Telegram automatically to confirm that your are REAL users and not other bots. 
+🎉🎉🎉🎉🎉
 
-If you are requested the same, please complete the process without worrying that your information may be compromized.
-(Please see screenshot of verification request.)
-** WE don't get any information about your verification **
+<b>Improved and shorter notification system interval.</b>
 
-Also,
+🎉🎉🎉🎉🎉
+Since we are getting large amount of subscribers day by day and (as you may know) API limit imposed by CoWIN website (100 requests / 5 minutes) we have to balance out the distribution and
+worked on improving timing and performance for your timely notifications.
 
-In case you were facing server unavailable from yesterday, it was because of request limit imposed by government website. 
-We worked hard to resolve that issue for now and it should be good. But they can only serve 100 requests per 5 minutes, so we will try to respond you as soon as possible. 
-In case of request limit is reached on our end then we will respond after some time automatically, you are requested to wait for some time.
+So finally,
+We have improved the subscription system and you should get notified in every approximately 3 minutes after couple of nights spent on coding/programming.
 
-🙏 We request your support in this time. 🙏
+We are thankful to you for your continues support and spreading this bot to your friends and family.
+
+In case you are not subscribed yet please follow below to get notified.
+
+Click /subscribe > then select your <b>state</b> > then your <b>district</b> > then centers near you (optional)
+
+To get started type or click on /subscribe
+To unsubscribe anytime click on /unsubscribe
+To snooze click /snooze
+
+/thanks - If you like efforts and tool is helping you, you may send appreciation message to developer
+
 Stay safe. Stay Healthy. Strong Together !
+
+
+(attached message to forward to your contacts)
                     `)
-                    this.bot.sendPhoto(e.id, 'https://originscan.in/assets/image/telegram-real-user.jpeg')
+                    setTimeout(() => {
+                        this.sendMessage({ chat: e }, `Hello,
+
+I found 💉💉 <b>Vaccincation Center Finder bot</b> 🤖🤖 on Telegram📱 \nwho helped me to find vaccination centers by
+pincode 4⃣2⃣2⃣0⃣1⃣0⃣,\nstates 🗺🗺\ndistrict wise 🗾🗾\nCenter Wise\nWeek wise and \nYou can subscribe for updates and get automatic notifications when there is a slot near your.\nYou can try it here, its very simple, elegant and FREE\n\n
+https://t.me/VaccineNotifier_IN_bot\n\nPlease Install Telegram before you click bot link, install telegram here https://telegram.org/`);
+                    }, 5000);
                 }
             });
         })
@@ -99,6 +146,9 @@ Stay safe. Stay Healthy. Strong Together !
             _that.bot.sendMessage(developerChatId, `isBlocked ? ${isBlocked} : ${msg.chat.first_name}, started using bot ! their username is ${msg.chat.username || 'Not known'}`)
             _that.sendMessage(msg,
                 `${isBlocked ? '<b>CURRENTLY WE ARE NOT ABLE TO GET RESPONSE FROM COWIN WEBSITE API, PLEASE TRY LATER OR CHECK ON <a href="https://www.cowin.gov.in/home">CoWIN Website</a></b>\n\n\n\n\n' : ''} ${commandSupport}`)
+            setTimeout(() => {
+                _that.sendMessage(msg, `Google Maps search results in your area as below: \nhttps://www.google.com/maps/search/vaccination+centres+near+me/\n\nWe dont\'t assure of these results, you may want to contact centers before reaching physically.'`)
+            }, 5000);
             _that.dbm.insert(msg.chat)
         });
 
@@ -109,7 +159,7 @@ Stay safe. Stay Healthy. Strong Together !
             _that.sendMessage(msg, `Hello,
 
 I found 💉💉 Vaccincation Center Finder bot 🤖🤖 on telegram📱 and it helped me to find vaccination centers by
-pincode 4⃣2⃣2⃣0⃣1⃣0⃣,\nstates 🗺🗺\ndistrict wise 🗾🗾\nYou can try it here, its very simple and elegant and FREE\n\n
+pincode 4⃣2⃣2⃣0⃣1⃣0⃣,\nstates 🗺🗺\ndistrict wise 🗾🗾\n You can subscribe for updates and get automatic notifications when there is a slot near your.\nYou can try it here, its very simple, elegant and FREE\n\n
 https://t.me/VaccineNotifier_IN_bot`);
         });
 
@@ -124,11 +174,17 @@ https://t.me/VaccineNotifier_IN_bot`);
                 _that.sendMessage(msg, dmsg)
             })
         });
+
         this.bot.onText(/\/districtlevel*/, function onText(msg) {
-            let [cmd, districtCode, date] = msg.text.split('_')
-            if (!date) {
-                date = moment();
-                date = date.format('DD-MM-YYYY')
+            let [cmd, districtCode, withZero] = msg.text.split('_')
+
+            let date = moment();
+            date = date.format('DD-MM-YYYY')
+            if (!withZero) {
+                setTimeout(() => {
+                    _that.sendMessage(msg, `Want centers with zero available vaccine too? click /districtlevel_${districtCode}_true`)
+
+                }, 5000);
             }
             if (!districtCode) {
                 _that.sendMessage(msg, `Please provide a district code to find vaccination centers, use /states for more information`)
@@ -139,12 +195,11 @@ https://t.me/VaccineNotifier_IN_bot`);
                     _that.sendMessage(msg, 'Server is busy or not reponding at the moment, please try again later. Please check on official website here on <a href="https://www.cowin.gov.in/home">CoWIN Website</a>')
                     return;
                 }
-                console.log('vaccination', d)
+                console.log('vaccination', districtCode, date, d)
                 let msgStr = `Hello ${msg.chat.first_name}, there are total ${d.centers.length} available centers for next 7 days, starting from ${date}`
-                msgStr += `\n(This data get updated on daily basis, so we recommend to keep checking)\n\n`
+                msgStr += `\n(This data get updated on daily basis, so we recommend to keep checking). <b>But result will only show where slot is available.</b>\n\n`
 
-                // d.centers = d.centers.sort((a, b) => a.name - b.name)
-                d.centers.forEach((c, i) => {
+                d.centers.map(c => {
                     let sum = 0;
                     let minAge = 100;
                     let v = Array.from(new Set(c.sessions.map(s => s.vaccine)))
@@ -154,21 +209,36 @@ https://t.me/VaccineNotifier_IN_bot`);
                             minAge = s.min_age_limit
                         }
                     });
-                    msgStr += `\n<b>${c.name}</b>, \n${c.district_name} (${c.pincode}) | age limit ${minAge} | Fees : ${c.fee_type}\nVaccines ${v} | Week Capacity : ${sum}\n<b>More Details ? /slotsinweek_${date.replace(/-/g, '_')}_${districtCode}_${c.center_id}</b>\n\n`
+                    c.minAge = minAge;
+                    c.sum = sum;
+                    c.vaccines = v;
+                })
+                console.log(JSON.stringify(d.centers))
+                d.centers = d.centers.sort((a, b) => b.sum - a.sum)
+                let added = 0;
+                d.centers.forEach((c, i) => {
+                    if (!withZero && c.sum > 0) {
+                        msgStr += `\n<b>${c.name}</b>, \n${c.district_name} (${c.pincode}) | age limit ${c.minAge} | Fees : ${c.fee_type}\nVaccines ${c.vaccines} | Week Capacity : ${c.sum}\n<b>More Details ? /slotsinweek_${date.replace(/-/g, '_')}_${districtCode}_${c.center_id}</b>\n\n`
+                        added++;
+                    }
+                    if (withZero) {
+                        added++
+                        msgStr += `\n<b>${c.name}</b>, \n${c.district_name} (${c.pincode}) | age limit ${c.minAge} | Fees : ${c.fee_type}\nVaccines ${c.vaccines} | Week Capacity : ${c.sum}\n<b>More Details ? /slotsinweek_${date.replace(/-/g, '_')}_${districtCode}_${c.center_id}</b>\n\n`
+                    }
                     setTimeout(() => {
                         _that.redisCache.setVal(`${date.replace(/-/g, '_')}_${districtCode}_${c.center_id}`, JSON.stringify(c)).then(x => { })
                     }, 0);
-                    if ((i + 1) % 20 === 0) {
+                    if ((added + 1) % 20 === 0) {
                         _that.sendMessage(msg, msgStr)
                         msgStr = `Continued.....,\n\n starting date from ${date}\n\n`
                     }
                 })
-                if ((d.centers.length + 1) % 20 !== 0) {
+                if ((added) % 20 !== 0) {
                     _that.sendMessage(msg, msgStr)
                 }
             })
         })
-        this.bot.onText(/\/district(.)*/, function onText(msg) {
+        this.bot.onText(/\/district_(.)*/, function onText(msg) {
             let [cmd, stateCode] = msg.text.split('_')
             let dmsg = ''
             if (!stateCode) {
@@ -281,6 +351,130 @@ https://t.me/VaccineNotifier_IN_bot`);
 
             }
         })
+
+
+        this.bot.onText(/\/snooze*/, function onText(msg) {
+            let chatId = msg.chat.id;
+            let date = new Date()
+            date.setHours(date.getHours() + 5)
+            _that.dbm.update({ id: chatId }, { pausedTill: date.getTime() })
+            _that.bot.sendMessage(msg.chat.id, 'You are snoozed from notification list for 5 Hrs. It will resume automatically.')
+        })
+
+        this.bot.onText(/\/unsubscribe*/, function onText(msg) {
+            let chatId = msg.chat.id;
+            _that.dbm.update({ id: chatId }, { subscriptionURLs: [], centerIds: [], pausedTill: null })
+            _that.bot.sendMessage(msg.chat.id, 'You are unsubscribed from the notification list, thanks for using Vaccination Finder. You can /subscribe anytime later.')
+        })
+
+        this.bot.onText(/\/subscribe*/, function onText(msg) {
+            var opts = {
+                reply_markup: {
+                    inline_keyboard: _that.chunk(JSON.parse(JSON.stringify(states)), 4).map((stateChunk, i) => {
+                        return stateChunk.map((state) => {
+                            return { text: state.state_name, callback_data: 'state_' + state.state_id }
+                        })
+                    })
+                }
+
+            };
+            _that.bot.sendMessage(msg.chat.id, 'What is your state ?', opts)
+
+        })
+        this.bot.on("callback_query", function (callbackQuery) {
+            // 'callbackQuery' is of type CallbackQuery
+            console.log(JSON.stringify(callbackQuery));
+            let [type, value] = callbackQuery.data.split('_')
+            let chatId = callbackQuery.from.id;
+            switch (type) {
+                case 'state':
+                    _that.dbm.update({ id: chatId }, { state: value })
+                    _that.requestDistrict(chatId, value)
+                    break;
+                case 'filterCenter':
+                    if (value == 'reset') {
+                        _that.dbm.update({ id: chatId }, { centerIds: [] })
+                        _that.bot.sendMessage(chatId, 'Filters for center Ids are removed.')
+                    } else {
+
+                        _that.dbm.updateCenterList({ id: chatId }, value)
+                        _that.bot.sendMessage(chatId, 'Filters updated.')
+                    }
+                    break;
+                case 'district':
+                    _that.dbm.update({ id: chatId }, {
+                        district: value,
+                        subscriptionURLs: [
+                            `https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/calendarByDistrict?district_id=${value}`,
+                            `https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/findByDistrict?district_id=${value}`
+                        ]
+                    })
+                    _that.bot.sendMessage(developerChatId, `${callbackQuery.from.first_name}, subscribed !`)
+                    _that.requestCenters(chatId, value)
+
+
+                    break;
+                default:
+                    break;
+            }
+            _that.bot.answerCallbackQuery(callbackQuery.id, 'Okay, got it !')
+        });
+    }
+    requestDistrict(chatId, state_id) {
+        var opts = {
+            reply_markup: {
+                inline_keyboard:
+                    this.chunk(JSON.parse(JSON.stringify(districts[state_id])), 4).map((districtChunk, i) => {
+                        return districtChunk.map((district) => {
+                            return { text: district.district_name, callback_data: 'district_' + district.district_id }
+                        })
+                    })
+            }
+
+        };
+        this.bot.sendMessage(chatId, 'Great, Click on your district to subscribe.', opts)
+        this.bot.sendMessage(chatId, `
+You are all set,
+
+I understood when to get back to you, and will let you know for nearby/district level centers.\n 
+Anytime you can update your subscription and<b> ONLY 1</b> subscription per user at district level allowed for now.\n
+
+Please note that we will keep trying automatically with your latest subscription and only inform you if there is any match/slot found.
+
+You can /unsubscribe anytime later.
+In case you want to snooze messages use /snooze - this will not send messages for next 5 hours
+Thanks!
+`, { parse_mode: 'HTML' })
+
+    }
+    requestCenters(chatId, districtCode) {
+
+        let date = moment();
+        date = date.format('DD-MM-YYYY')
+        this.getForWeekByDistrict(date, districtCode, (d) => {
+            var opts = {
+                reply_markup: {
+                    inline_keyboard:
+                        d.centers.map((center) => {
+                            return [{ text: `${center.name}, ${center.block_name}, ${center.pincode}`, callback_data: 'filterCenter_' + center.center_id }]
+                        })
+                }
+            };
+            this.bot.sendMessage(chatId, 'Okay, now click on all centers you like to subscribe to.', opts)
+        })
+
+        this.getVaccinesInDistrict(districtCode, '01-05-2021', (r) => { //fixed date for data
+            var opts = {
+                reply_markup: {
+                    inline_keyboard:
+                        r.sessions.map((center) => {
+                            return [{ text: `${center.name}, ${center.block_name}, ${center.pincode}`, callback_data: 'filterCenter_' + center.center_id }]
+                        })
+                }
+            };
+            console.log('sessions', r)
+            this.bot.sendMessage(chatId, 'Here are few more centers, now click on all centers you like to subscribe to.', opts)
+        })
     }
     chunk(array, size) {
         var result = [];
@@ -297,7 +491,8 @@ https://t.me/VaccineNotifier_IN_bot`);
         console.info(`Telegram sending message to ::: ${msgObj.chat.id} :: ${msgObj.chat.first_name} :: ${msgObj.chat.username}:::\n ${message}`)
         // this.bot.sendMessage(chatId, message, { parse_mode: 'MarkdownV2' })
         if (message && message.length)
-            this.bot.sendMessage(msgObj.chat.id, message, { parse_mode: 'HTML' })
+            this.telegramProcessor.sendMessage(msgObj.chat.id, message)
+        //this.bot.sendMessage(msgObj.chat.id, message, { parse_mode: 'HTML' })
     }
 
 
@@ -379,7 +574,8 @@ https://t.me/VaccineNotifier_IN_bot`);
     }
 
     getDistricts(stateCode, cbFun) {
-        cbFun(cbFun({ "districts": districts[stateCode], "ttl": 24 }))
+        console.log('Looking for ', stateCode)
+        cbFun(cbFun({ "districts": JSON.parse(JSON.stringify(districts[stateCode])), "ttl": 24 }))
     }
 
     makeGetRequest(url, cbFun) {

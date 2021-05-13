@@ -1,5 +1,6 @@
 import { connect } from 'mongoose';
 import { query } from 'winston';
+import MsgsModel from './db/msgs.model';
 import UsersModel from './db/users.model';
 import { logger } from './logger';
 
@@ -46,9 +47,36 @@ export class DBManager {
 
         }
     }
-    async find(query = {}) {
+    async find(query = {}, skip = 0, limit = 5000) {
         console.log('Find in DB', query);
-        const r = await UsersModel.find(query)
+        const r = await UsersModel.find(query, {}, { skip, limit })
+        return r;
+    }
+    async groupByDistrictCode() {
+        console.log('Find in DB', query);
+        const r = await UsersModel.aggregate([{ $group: { _id: "$district", users: { $push: "$$ROOT" } } }]);
+        return r;
+    }
+    async update(query = {}, newData) {
+        console.log('Update in DB', query, newData);
+        const r = await UsersModel.updateOne(query, { ...newData })
+        return r;
+    }
+    async updateCenterList(query = {}, centerId) {
+        console.log('Update centers in DB', query, centerId);
+        const r = await UsersModel.updateOne(query, { $push: { centerIds: centerId } })
+        return r;
+    }
+
+    async delete(chatId) {
+        console.log('Update centers in DB', query);
+        const r = await UsersModel.deleteOne({ id: chatId })
+        return r;
+    }
+
+    async saveMsg(obj) {
+        console.log('Save msg in db', obj);
+        const r = await MsgsModel.create(obj)
         return r;
     }
 }

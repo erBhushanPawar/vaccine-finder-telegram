@@ -19,7 +19,7 @@ export class RedisCache {
     }
 
     async setVal(key: string, val) {
-        console.log('setVal', key, val);
+        console.log('setVal', key);
         return await this.setAsync(key, val);
     }
 }
