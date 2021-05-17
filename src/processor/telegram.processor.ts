@@ -21,7 +21,7 @@ export class TelegramProcessor {
         message += '\n\n\n' + 'MsgId : ' + msgObj.msgId
         this.sharedBotInstance.sendMessage(chatId, message, { parse_mode: 'HTML', ...opts })
             .then(() => {
-                console.log('Delivered message to', chatId, message)//.substring(0, 500))
+                console.log('Delivered message to', chatId)//.substring(0, 500))
                 msgObj.deliveredOn = new Date().getTime();
                 _that.dbm.saveMsg(msgObj)
             })

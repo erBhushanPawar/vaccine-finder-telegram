@@ -35,12 +35,15 @@ export class DBManager {
             });
     }
 
-    async insert(entry) {
+    async insert(entry, cbFun?) {
         try {
             UsersModel.findOne({ id: entry.id }).then((user) => {
-                if (user) { console.log('Returning user', entry); return }
-
+                if (user) {
+                    cbFun(false)
+                    console.log('Returning user', entry); return
+                }
                 UsersModel.create(entry)
+                cbFun(true)
                 console.log('Added to DB', entry);
             })
         } catch (error) {
@@ -75,7 +78,7 @@ export class DBManager {
     }
 
     async saveMsg(obj) {
-        console.log('Save msg in db', obj);
+        //console.log('Save msg in db', obj);
         const r = await MsgsModel.create(obj)
         return r;
     }

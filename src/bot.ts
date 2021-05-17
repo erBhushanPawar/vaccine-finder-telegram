@@ -2,8 +2,6 @@ import * as TelegramBot from './telegram-lib';
 import * as dbmgr from './mongo.db';
 import * as redisCache from './db/redis-cache';
 import { districts, states } from './db/master.data';
-import { MQTTManager } from './mqtt';
-import { logger } from './logger';
 import { RMQ } from './processor/rabbitmq';
 import { TelegramProcessor } from './processor/telegram.processor';
 const moment = require('moment');
@@ -55,7 +53,6 @@ export class VaccineNotifierTelegramBot {
     bot;
     dbm = new dbmgr.DBManager();
     redisCache = new redisCache.RedisCache()
-    mqttMgr = null;
     rmqMgr = null;
     telegramProcessor
     constructor() {
@@ -64,32 +61,26 @@ export class VaccineNotifierTelegramBot {
         this.bot.on("polling_error", console.log);
         this.initCommands()
         console.log('BOT OK')
-        this.mqttMgr = new MQTTManager(this.bot, this.redisCache, this.dbm)
+
         this.rmqMgr = new RMQ()
         let priorityList = [886698854, 1573533763, 1216194906, 1714758916, 980753480]
         setInterval(() => {
             this.dbm.groupByDistrictCode().then(r => {
+                let count = 0;
+                r = r.sort(() => .5 - Math.random())//.slice(0, 50);
                 r.forEach(e => {
-                    if (e._id == 363) {
-                        console.log('publishing job')
-                        this.rmqMgr.publish({ districtCode: e._Id, ...e })
+                    // if (e._id == 363) {
+                    if (e._id) {
+                        console.log('publishing job for district code', e._id, ++count)
+                        this.rmqMgr.publish({ districtCode: e._id, ...e })
                     }
+                    //}
                 });
             })
         }, 3 * 60 * 1000)
 
         //this.sendAnnouncement()
     }
-    sendNotification() {
-
-        this.dbm.find().then((d) => {
-            d = JSON.parse(JSON.stringify(d))
-            this.mqttMgr.processDB(d)
-        })
-
-
-    }
-
     sendAnnouncement() {
         this.dbm.find().then((d) => {
             d = JSON.parse(JSON.stringify(d))
@@ -143,13 +134,15 @@ https://t.me/VaccineNotifier_IN_bot\n\nPlease Install Telegram before you click 
         const _that = this;
         this.bot.onText(/\/start$/, function onText(msg) {
             msgObjs.push(msg.chat)
-            _that.bot.sendMessage(developerChatId, `isBlocked ? ${isBlocked} : ${msg.chat.first_name}, started using bot ! their username is ${msg.chat.username || 'Not known'}`)
             _that.sendMessage(msg,
                 `${isBlocked ? '<b>CURRENTLY WE ARE NOT ABLE TO GET RESPONSE FROM COWIN WEBSITE API, PLEASE TRY LATER OR CHECK ON <a href="https://www.cowin.gov.in/home">CoWIN Website</a></b>\n\n\n\n\n' : ''} ${commandSupport}`)
             setTimeout(() => {
                 _that.sendMessage(msg, `Google Maps search results in your area as below: \nhttps://www.google.com/maps/search/vaccination+centres+near+me/\n\nWe dont\'t assure of these results, you may want to contact centers before reaching physically.'`)
             }, 5000);
-            _that.dbm.insert(msg.chat)
+            _that.dbm.insert(msg.chat, (isNew) => {
+                _that.bot.sendMessage(developerChatId, `isNew ? ${isNew} : ${msg.chat.first_name}, started using bot ! their username is ${msg.chat.username || 'Not known'}`)
+
+            })
         });
 
         this.bot.onText(/\/thanks$/, function onText(msg) {
@@ -381,6 +374,19 @@ https://t.me/VaccineNotifier_IN_bot`);
             _that.bot.sendMessage(msg.chat.id, 'What is your state ?', opts)
 
         })
+        this.bot.onText(/\/age*/, function onText(msg) {
+            var opts = {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '45+', callback_data: 'age_45' }, { text: '18+', callback_data: 'age_18' }]
+
+                    ]
+                }
+
+            };
+            _that.bot.sendMessage(msg.chat.id, 'For which age range you want notifications?', opts)
+
+        })
         this.bot.on("callback_query", function (callbackQuery) {
             // 'callbackQuery' is of type CallbackQuery
             console.log(JSON.stringify(callbackQuery));
@@ -390,6 +396,10 @@ https://t.me/VaccineNotifier_IN_bot`);
                 case 'state':
                     _that.dbm.update({ id: chatId }, { state: value })
                     _that.requestDistrict(chatId, value)
+                    break;
+                case 'age':
+                    _that.dbm.update({ id: chatId }, { age: Number(value) })
+                    _that.bot.sendMessage(chatId, 'Understood you will now get filtered notifications for ' + value)
                     break;
                 case 'filterCenter':
                     if (value == 'reset') {
