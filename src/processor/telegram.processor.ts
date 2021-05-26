@@ -1,9 +1,10 @@
 import * as dbmgr from '../mongo.db';
-
+const atob = require('atob')
 export class TelegramProcessor {
     sharedBotInstance = null;
     static instance: TelegramProcessor;
     dbm = new dbmgr.DBManager();
+    msgCache = {}
     constructor(botInstance) {
         this.sharedBotInstance = botInstance;
     }
@@ -14,9 +15,16 @@ export class TelegramProcessor {
         return TelegramProcessor.instance;
     }
 
-    sendMessage(chatId, message, opts) {
+    sendMessage(chatId, message, opts, useMsgCache = false) {
         const _that = this;
+        if (useMsgCache) {
+            if (this.msgCache[chatId] == atob(message)) {
+                console.log('Ignored duplicate message', chatId)
+                return;
+            }
 
+            this.msgCache[chatId] = atob(message);
+        }
         let msgObj: any = { message, msgId: this.getMsgId(), chatId, acceptedOn: new Date().getTime() }
         message += '\n\n\n' + 'MsgId : ' + msgObj.msgId
         this.sharedBotInstance.sendMessage(chatId, message, { parse_mode: 'HTML', ...opts })

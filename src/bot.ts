@@ -61,25 +61,25 @@ export class VaccineNotifierTelegramBot {
         this.bot.on("polling_error", console.log);
         this.initCommands()
         console.log('BOT OK')
-
         this.rmqMgr = new RMQ()
-        let priorityList = [886698854, 1573533763, 1216194906, 1714758916, 980753480]
         setInterval(() => {
             this.dbm.groupByDistrictCode().then(r => {
                 let count = 0;
-                r = r.sort(() => .5 - Math.random())//.slice(0, 50);
+                r = r.sort(() => .5 - Math.random()).slice(0, 70);
                 r.forEach(e => {
-                    // if (e._id == 363) {
+
                     if (e._id) {
                         console.log('publishing job for district code', e._id, ++count)
                         this.rmqMgr.publish({ districtCode: e._id, ...e })
                     }
-                    //}
+
                 });
             })
+
+            // this.bot.sendMessage(developerChatId, 'Heartbeat.')
+
         }, 3 * 60 * 1000)
 
-        //this.sendAnnouncement()
     }
     sendAnnouncement() {
         this.dbm.find().then((d) => {
@@ -92,16 +92,11 @@ Hello ${e.first_name}
 
 🎉🎉🎉🎉🎉
 
-<b>Improved and shorter notification system interval.</b>
+<b>Auto filter with AGE</b>
 
 🎉🎉🎉🎉🎉
-Since we are getting large amount of subscribers day by day and (as you may know) API limit imposed by CoWIN website (100 requests / 5 minutes) we have to balance out the distribution and
-worked on improving timing and performance for your timely notifications.
 
-So finally,
-We have improved the subscription system and you should get notified in every approximately 3 minutes after couple of nights spent on coding/programming.
-
-We are thankful to you for your continues support and spreading this bot to your friends and family.
+<b>ONLY For all subscribed users</b> we have introduced new feature for filtering results as per age, to update your preferences please click /age . 
 
 In case you are not subscribed yet please follow below to get notified.
 
@@ -216,7 +211,8 @@ https://t.me/VaccineNotifier_IN_bot`);
                     }
                     if (withZero) {
                         added++
-                        msgStr += `\n<b>${c.name}</b>, \n${c.district_name} (${c.pincode}) | age limit ${c.minAge} | Fees : ${c.fee_type}\nVaccines ${c.vaccines} | Week Capacity : ${c.sum}\n<b>More Details ? /slotsinweek_${date.replace(/-/g, '_')}_${districtCode}_${c.center_id}</b>\n\n`
+                        msgStr += `\n<b>${c.name}</b>, \n${c.district_name} (${c.pincode}) | age limit ${c.minAge} | Fees : ${c.fee_type}\nVaccines ${c.vaccines} | dose 1 ${c.available_capacity_dose1} | dose 2 ${c.available_capacity_dose2} | Week Capacity : ${c.sum}\n<b>More Details ? /slotsinweek_${date.replace(/-/g, '_')}_${districtCode}_${c.center_id}</b>\n\n`
+
                     }
                     setTimeout(() => {
                         _that.redisCache.setVal(`${date.replace(/-/g, '_')}_${districtCode}_${c.center_id}`, JSON.stringify(c)).then(x => { })
@@ -356,7 +352,7 @@ https://t.me/VaccineNotifier_IN_bot`);
 
         this.bot.onText(/\/unsubscribe*/, function onText(msg) {
             let chatId = msg.chat.id;
-            _that.dbm.update({ id: chatId }, { subscriptionURLs: [], centerIds: [], pausedTill: null })
+            _that.dbm.update({ id: chatId }, { subscriptionURLs: [], centerIds: [], pausedTill: null, dose: null })
             _that.bot.sendMessage(msg.chat.id, 'You are unsubscribed from the notification list, thanks for using Vaccination Finder. You can /subscribe anytime later.')
         })
 
@@ -387,6 +383,27 @@ https://t.me/VaccineNotifier_IN_bot`);
             _that.bot.sendMessage(msg.chat.id, 'For which age range you want notifications?', opts)
 
         })
+        this.bot.onText(/\/dose*/, function onText(msg) {
+            var opts = {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '1', callback_data: 'dose_1' }, { text: '2', callback_data: 'dose_2' }]
+
+                    ]
+                }
+
+            };
+            _that.bot.sendMessage(msg.chat.id, 'For which Dose you want notifications ?', opts)
+        })
+        this.bot.onText(/\/filterCenter*/, function onText(msg) {
+            let [cmd, value] = msg.text.split('_')
+            if (value === 'reset') {
+                _that.filterCenter(msg.chat.id, value)
+            } else {
+                _that.requestCenters(msg.chat.id, value)
+            }
+
+        })
         this.bot.on("callback_query", function (callbackQuery) {
             // 'callbackQuery' is of type CallbackQuery
             console.log(JSON.stringify(callbackQuery));
@@ -399,17 +416,16 @@ https://t.me/VaccineNotifier_IN_bot`);
                     break;
                 case 'age':
                     _that.dbm.update({ id: chatId }, { age: Number(value) })
+                    _that.bot.sendMessage(developerChatId, 'Updated age preferences' + value + ' chat id ' + chatId)
                     _that.bot.sendMessage(chatId, 'Understood you will now get filtered notifications for ' + value)
                     break;
+                case 'dose':
+                    _that.dbm.update({ id: chatId }, { dose: Number(value) })
+                    _that.bot.sendMessage(developerChatId, 'Updated dose preferences' + value + ' chat id ' + chatId)
+                    _that.bot.sendMessage(chatId, 'Now you will get notifications for dose ' + value)
+                    break;
                 case 'filterCenter':
-                    if (value == 'reset') {
-                        _that.dbm.update({ id: chatId }, { centerIds: [] })
-                        _that.bot.sendMessage(chatId, 'Filters for center Ids are removed.')
-                    } else {
-
-                        _that.dbm.updateCenterList({ id: chatId }, value)
-                        _that.bot.sendMessage(chatId, 'Filters updated.')
-                    }
+                    _that.filterCenter(chatId, value)
                     break;
                 case 'district':
                     _that.dbm.update({ id: chatId }, {
@@ -420,15 +436,37 @@ https://t.me/VaccineNotifier_IN_bot`);
                         ]
                     })
                     _that.bot.sendMessage(developerChatId, `${callbackQuery.from.first_name}, subscribed !`)
-                    _that.requestCenters(chatId, value)
+                    //_that.requestCenters(chatId, value)
+                    _that.sendMessage({ chat: { id: chatId } }, `Great, you are subscribed to district code ${value}, let me know your filters as below.\n\n/age set age range filter.\n/dose - set Dose preferences\n/filterCenter_${value} to set center preferences (optional)\n/filterCenter_reset - reset center preferences`)
+                    _that.sendMessage({ chat: { id: chatId } }, `
+You are all set,
 
+I understood when to get back to you, and will let you know for nearby/district level centers.\n 
+Anytime you can update your subscription and<b> ONLY 1</b> subscription per user at district level allowed for now.\n
 
+Please note that we will keep trying automatically with your latest subscription and only inform you if there is any match/slot found.
+
+You can /unsubscribe anytime later.
+In case you want to snooze messages use /snooze - this will not send messages for next 5 hours
+Thanks!
+`)
                     break;
                 default:
                     break;
             }
             _that.bot.answerCallbackQuery(callbackQuery.id, 'Okay, got it !')
         });
+    }
+    filterCenter(chatId, value) {
+        if (value == 'reset') {
+            this.dbm.update({ id: chatId }, { centerIds: [] })
+            this.bot.sendMessage(chatId, 'Filters for center Ids are removed.')
+        } else {
+
+            this.dbm.updateCenterList({ id: chatId }, value)
+            this.bot.sendMessage(chatId, 'Filters updated.')
+        }
+
     }
     requestDistrict(chatId, state_id) {
         var opts = {
@@ -443,18 +481,7 @@ https://t.me/VaccineNotifier_IN_bot`);
 
         };
         this.bot.sendMessage(chatId, 'Great, Click on your district to subscribe.', opts)
-        this.bot.sendMessage(chatId, `
-You are all set,
 
-I understood when to get back to you, and will let you know for nearby/district level centers.\n 
-Anytime you can update your subscription and<b> ONLY 1</b> subscription per user at district level allowed for now.\n
-
-Please note that we will keep trying automatically with your latest subscription and only inform you if there is any match/slot found.
-
-You can /unsubscribe anytime later.
-In case you want to snooze messages use /snooze - this will not send messages for next 5 hours
-Thanks!
-`, { parse_mode: 'HTML' })
 
     }
     requestCenters(chatId, districtCode) {
@@ -462,6 +489,10 @@ Thanks!
         let date = moment();
         date = date.format('DD-MM-YYYY')
         this.getForWeekByDistrict(date, districtCode, (d) => {
+            if (!d) {
+                this.bot.sendMessage(chatId, 'Please try again later after 2-3 minutes we have reached the API limit.')
+                return;
+            }
             var opts = {
                 reply_markup: {
                     inline_keyboard:
@@ -473,11 +504,15 @@ Thanks!
             this.bot.sendMessage(chatId, 'Okay, now click on all centers you like to subscribe to.', opts)
         })
 
-        this.getVaccinesInDistrict(districtCode, '01-05-2021', (r) => { //fixed date for data
+        this.getVaccinesInDistrict(districtCode, date, (r) => { //fixed date for data
+            if (!r) {
+                this.bot.sendMessage(chatId, 'Please try again later after 2-3 minutes we have reached the API limit.')
+                return;
+            }
             var opts = {
                 reply_markup: {
                     inline_keyboard:
-                        r.sessions.map((center) => {
+                        (r && r.sessions || []).map((center) => {
                             return [{ text: `${center.name}, ${center.block_name}, ${center.pincode}`, callback_data: 'filterCenter_' + center.center_id }]
                         })
                 }
